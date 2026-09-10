@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Google Sheets 讀寫工具</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Microsoft JhengHei", "PingFang TC", Arial, sans-serif;
+    background: #f4f5f7;
+    margin: 0;
+    padding: 0;
+    color: #222;
+  }
+  .container {
+    max-width: 720px;
+    margin: 40px auto;
+    padding: 0 16px;
+  }
+  h1 {
+    font-size: 1.4em;
+    text-align: center;
+    margin-bottom: 24px;
+  }
+  .card {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+  .card h2 {
+    margin-top: 0;
+    font-size: 1.1em;
+    border-left: 4px solid #4285f4;
+    padding-left: 10px;
+  }
+  label {
+    display: block;
+    margin-top: 12px;
+    margin-bottom: 4px;
+    font-size: 0.9em;
+    color: #555;
+  }
+  input[type="text"],
+  input[type="password"],
+  textarea {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 0.95em;
+  }
+  textarea {
+    min-height: 80px;
+    font-family: monospace;
+    resize: vertical;
+  }
+  .btn-row {
+    margin-top: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  button {
+    background: #4285f4;
+    color: #fff;
+    border: none;
+    padding: 9px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9em;
+  }
+  button:hover { background: #3367d6; }
+  button.secondary { background: #757575; }
+  button.secondary:hover { background: #616161; }
+  button.danger { background: #d93025; }
+  button.danger:hover { background: #b1271e; }
+  #login-screen {
+    max-width: 360px;
+    margin: 80px auto;
+  }
+  #main-screen { display: none; }
+  #result-area {
+    margin-top: 16px;
+    background: #fafafa;
+    border: 1px solid #eee;
+    border-radius: 4px;
+    padding: 10px;
+    max-height: 300px;
+    overflow: auto;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.85em;
+  }
+  table td, table th {
+    border: 1px solid #ddd;
+    padding: 4px 8px;
+    text-align: left;
+    white-space: nowrap;
+  }
+  #status-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #333;
+    color: #fff;
+    padding: 10px 16px;
+    font-size: 0.85em;
+    min-height: 20px;
+  }
+  #status-bar.error { background: #b1271e; }
+  #status-bar.success { background: #1e7e34; }
+  .top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .top-bar button {
+    background: none;
+    color: #4285f4;
+    border: 1px solid #4285f4;
+    padding: 4px 12px;
+  }
+</style>
+</head>
+<body>
+
+<!-- ===================== 登入畫面 ===================== -->
+<div id="login-screen" class="container">
+  <div class="card">
+    <h2>登入</h2>
+    <label for="login-username">帳號</label>
+    <input type="text" id="login-username" autocomplete="username">
+    <label for="login-password">密碼</label>
+    <input type="password" id="login-password" autocomplete="current-password">
+    <div class="btn-row">
+      <button onclick="handleLogin()">登入</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== 主畫面（登入後） ===================== -->
+<div id="main-screen" class="container">
+  <div class="top-bar">
+    <h1 style="margin:0;">Google Sheets 讀寫工具</h1>
+    <button onclick="handleLogout()">登出</button>
+  </div>
+
+  <!-- 讀取區 -->
+  <div class="card">
+    <h2>讀取</h2>
+    <label for="read-sheet-name">試算表名稱</label>
+    <input type="text" id="read-sheet-name" placeholder="例如：工作表1">
+    <label for="read-range">儲存格範圍</label>
+    <input type="text" id="read-range" placeholder="例如：A1:C10">
+    <div class="btn-row">
+      <button onclick="handleRead()">讀取</button>
+    </div>
+    <div id="result-area">（尚無資料）</div>
+  </div>
+
+  <!-- 寫入區 -->
+  <div class="card">
+    <h2>寫入</h2>
+    <label for="write-sheet-name">試算表名稱</label>
+    <input type="text" id="write-sheet-name" placeholder="例如：工作表1">
+    <label for="write-range">儲存格範圍</label>
+    <input type="text" id="write-range" placeholder="例如：A1:C10">
+    <label for="write-data">資料（每列以換行分隔，每欄以逗號分隔）</label>
+    <textarea id="write-data" placeholder="例如：&#10;a1,b1,c1&#10;a2,b2,c2"></textarea>
+    <div class="btn-row">
+      <button onclick="handleWrite()">寫入</button>
+      <button class="secondary" onclick="handleAppend()">寫在最下方</button>
+      <button class="secondary" onclick="handleInsertAtTop()">從頭插入</button>
+      <button class="danger" onclick="handleClear()">清除範圍內容</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== 狀態列 ===================== -->
+<div id="status-bar">尚未執行任何動作</div>
+
+<script>
+/* ============================================================
+   設定區：請將 XXXXX 換成實際的值
+   ============================================================ */
+
+// GAS 部署後取得的網頁應用程式網址
+const GAS_URL = "";
+
+/* ============================================================
+   狀態列
+   ============================================================ */
+function setStatus(message, type) {
+  const bar = document.getElementById("status-bar");
+  bar.textContent = message;
+  bar.className = "";
+  if (type === "error") bar.classList.add("error");
+  if (type === "success") bar.classList.add("success");
+}
+
+/* ============================================================
+   共用：呼叫 GAS API
+   XXXXX: 請依照附件的 GAS API 使用說明，調整下方的
+          - HTTP 方法（GET / POST）
+          - 參數名稱（action / sheet / range / values ...）
+          - 回傳資料格式的解析方式
+   目前先以「假設 GAS 會回傳 JSON，且格式為
+   { success: true/false, data: ..., message: ... }」的方式撰寫，
+   之後請依實際文件調整。
+   ============================================================ */
+async function callGAS(params) {
+  // params 為物件，例如 { action: "read", sheet: "...", range: "..." }
+  setStatus("處理中...");
+
+  try {
+    // XXXXX: 若 API 是用 GET + query string，使用下面這段
+    const url = new URL(GAS_URL);
+    Object.keys(params).forEach(key => {
+      url.searchParams.append(key, params[key]);
+    });
+
+    const response = await fetch(url.toString(), {
+      method: "GET" // XXXXX: 若寫入動作需要用 POST，請改成 "POST" 並改用下面的 POST 版本
+    });
+
+    /* XXXXX: 若 API 需要用 POST 傳送 JSON body，改用以下寫法，
+       並移除上面的 GET 版本：
+
+    const response = await fetch(GAS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params)
+    });
+    */
+
+    if (!response.ok) {
+      throw new Error("HTTP 狀態碼：" + response.status);
+    }
+
+    const result = await response.json();
+
+    // XXXXX: 依實際回傳格式調整判斷成功/失敗的方式
+    if (result.success === false) {
+      throw new Error(result.message || "GAS 回傳失敗");
+    }
+
+    return result;
+
+  } catch (err) {
+    setStatus("發生錯誤：" + err.message, "error");
+    throw err;
+  }
+}
+
+/* ============================================================
+   登入 / 登出
+   XXXXX: 目前登入僅為前端示意，未實際驗證帳密。
+          請依照附件說明，改成呼叫 GAS 進行帳密驗證，
+          例如：callGAS({ action: "login", username, password })
+   ============================================================ */
+async function handleLogin() {
+  const username = document.getElementById("login-username").value.trim();
+  const password = document.getElementById("login-password").value;
+
+  if (!username || !password) {
+    setStatus("請輸入帳號與密碼", "error");
+    return;
+  }
+
+  // XXXXX: 這裡先假設登入一定成功，之後請改成實際呼叫 GAS 驗證
+  // try {
+  //   const result = await callGAS({ action: "login", username: username, password: password });
+  //   ...依 result 判斷是否登入成功
+  // } catch (err) {
+  //   return;
+  // }
+
+  document.getElementById("login-screen").style.display = "none";
+  document.getElementById("main-screen").style.display = "block";
+  setStatus("登入成功", "success");
+}
+
+function handleLogout() {
+  document.getElementById("main-screen").style.display = "none";
+  document.getElementById("login-screen").style.display = "block";
+  document.getElementById("login-username").value = "";
+  document.getElementById("login-password").value = "";
+  setStatus("已登出");
+}
+
+/* ============================================================
+   讀取
+   ============================================================ */
+async function handleRead() {
+  const sheetName = document.getElementById("read-sheet-name").value.trim();
+  const range = document.getElementById("read-range").value.trim();
+  const resultArea = document.getElementById("result-area");
+
+  if (!sheetName || !range) {
+    setStatus("請輸入試算表名稱與儲存格範圍", "error");
+    return;
+  }
+
+  try {
+    // XXXXX: action 名稱、參數 key（sheet / range）請依文件調整
+    const result = await callGAS({
+      action: "read",
+      sheet: sheetName,
+      range: range
+    });
+
+    // XXXXX: 假設 result.data 是二維陣列，例如 [["a1","b1"],["a2","b2"]]
+    renderTable(result.data, resultArea);
+    setStatus("讀取成功", "success");
+
+  } catch (err) {
+    resultArea.textContent = "讀取失敗";
+  }
+}
+
+function renderTable(data, container) {
+  if (!Array.isArray(data) || data.length === 0) {
+    container.textContent = "（無資料）";
+    return;
+  }
+
+  let html = "<table>";
+  data.forEach(row => {
+    html += "<tr>";
+    row.forEach(cell => {
+      html += "<td>" + escapeHtml(String(cell)) + "</td>";
+    });
+    html += "</tr>";
+  });
+  html += "</table>";
+  container.innerHTML = html;
+}
+
+function escapeHtml(str) {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/* ============================================================
+   寫入相關：將 textarea 內容轉成二維陣列
+   ============================================================ */
+function parseWriteData() {
+  const raw = document.getElementById("write-data").value;
+  return raw
+    .split("\n")
+    .filter(line => line.trim() !== "")
+    .map(line => line.split(",").map(cell => cell.trim()));
+}
+
+function getWriteParams() {
+  const sheetName = document.getElementById("write-sheet-name").value.trim();
+  const range = document.getElementById("write-range").value.trim();
+  return { sheetName, range };
+}
+
+/* ============================================================
+   寫入：覆蓋指定範圍
+   ============================================================ */
+async function handleWrite() {
+  const { sheetName, range } = getWriteParams();
+  const values = parseWriteData();
+
+  if (!sheetName || !range) {
+    setStatus("請輸入試算表名稱與儲存格範圍", "error");
+    return;
+  }
+
+  try {
+    // XXXXX: action 名稱與參數 key 請依文件調整
+    await callGAS({
+      action: "write",
+      sheet: sheetName,
+      range: range,
+      values: JSON.stringify(values)
+    });
+    setStatus("寫入成功", "success");
+  } catch (err) {
+    // 錯誤已於 callGAS 內顯示
+  }
+}
+
+/* ============================================================
+   寫在最下方：附加到試算表最後一列
+   ============================================================ */
+async function handleAppend() {
+  const { sheetName } = getWriteParams();
+  const values = parseWriteData();
+
+  if (!sheetName) {
+    setStatus("請輸入試算表名稱", "error");
+    return;
+  }
+
+  try {
+    // XXXXX: action 名稱與參數 key 請依文件調整（此動作可能不需要 range）
+    await callGAS({
+      action: "append",
+      sheet: sheetName,
+      values: JSON.stringify(values)
+    });
+    setStatus("已寫入最下方", "success");
+  } catch (err) {
+    // 錯誤已於 callGAS 內顯示
+  }
+}
+
+/* ============================================================
+   從頭插入：插入到試算表最前面（例如第一列之後、標題列之下）
+   ============================================================ */
+async function handleInsertAtTop() {
+  const { sheetName } = getWriteParams();
+  const values = parseWriteData();
+
+  if (!sheetName) {
+    setStatus("請輸入試算表名稱", "error");
+    return;
+  }
+
+  try {
+    // XXXXX: action 名稱與參數 key 請依文件調整
+    await callGAS({
+      action: "insertTop",
+      sheet: sheetName,
+      values: JSON.stringify(values)
+    });
+    setStatus("已從頭插入", "success");
+  } catch (err) {
+    // 錯誤已於 callGAS 內顯示
+  }
+}
+
+/* ============================================================
+   清除範圍內容
+   ============================================================ */
+async function handleClear() {
+  const { sheetName, range } = getWriteParams();
+
+  if (!sheetName || !range) {
+    setStatus("請輸入試算表名稱與儲存格範圍", "error");
+    return;
+  }
+
+  try {
+    // XXXXX: action 名稱與參數 key 請依文件調整
+    await callGAS({
+      action: "clear",
+      sheet: sheetName,
+      range: range
+    });
+    setStatus("已清除範圍內容", "success");
+  } catch (err) {
+    // 錯誤已於 callGAS 內顯示
+  }
+}
+</script>
+
+</body>
+</html>
