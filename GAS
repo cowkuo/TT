@@ -191,8 +191,7 @@
    ============================================================ */
 
 // GAS 部署後取得的網頁應用程式網址
-const GAS_URL = "https://script.google.com/macros/s/AKfycbylvtvY70fSmjsTeKt4qK7v9kple6-sloiJ6VYD8_r8XzVw5N9CDDlnCnHGxpqpekm_hQ/exec
-";
+const GAS_URL = "XXXXX";
 
 /* ============================================================
    狀態列
