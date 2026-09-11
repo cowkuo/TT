@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>試算表操作台</title>
+<style>
+  :root{
+    --bg:#eef1f2;
+    --panel:#ffffff;
+    --ink:#1c2226;
+    --ink-soft:#5a656b;
+    --line:#c9d0d3;
+    --accent:#2c5364;
+    --accent-soft:#e4ebed;
+    --ok:#2f6b3f;
+    --err:#a13a2c;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang TC", "Microsoft JhengHei", sans-serif;
+  }
+  *{ box-sizing:border-box; }
+  html,body{
+    margin:0; padding:0; min-height:100vh;
+    background:var(--bg); color:var(--ink);
+    font-family:var(--sans);
+  }
+  body{ display:flex; justify-content:center; padding:32px 16px 96px; }
+  .frame{ width:100%; max-width:640px; }
+
+  h1{
+    font-size:20px; font-weight:600; letter-spacing:0.2px;
+    margin:0 0 4px;
+  }
+  .sub{ color:var(--ink-soft); font-size:13px; margin:0 0 28px; }
+
+  /* --- login --- */
+  #loginScreen .panel{ margin-top:8px; }
+
+  /* --- shared panel --- */
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    padding:22px 22px 20px;
+  }
+  .panel + .panel{ margin-top:20px; }
+  .panel h2{
+    font-size:14px; font-weight:600; margin:0 0 16px;
+    padding-bottom:10px; border-bottom:1px solid var(--line);
+    color:var(--accent);
+  }
+
+  label{
+    display:block; font-size:12.5px; color:var(--ink-soft);
+    margin:0 0 5px;
+  }
+  .field{ margin-bottom:14px; }
+  input[type=text], input[type=password], textarea{
+    width:100%; padding:9px 10px; font-size:14px;
+    border:1px solid var(--line); background:#fbfcfc; color:var(--ink);
+    font-family:var(--sans);
+  }
+  input:focus, textarea:focus, button:focus{
+    outline:2px solid var(--accent); outline-offset:1px;
+  }
+  textarea{ font-family:var(--mono); min-height:64px; resize:vertical; }
+  .row{ display:flex; gap:12px; }
+  .row > .field{ flex:1; }
+
+  button{
+    font-family:var(--sans); font-size:13.5px; font-weight:600;
+    padding:9px 16px; border:1px solid var(--accent);
+    background:var(--accent); color:#fff; cursor:pointer;
+  }
+  button:hover{ background:#254453; }
+  button.secondary{
+    background:#fff; color:var(--accent);
+  }
+  button.secondary:hover{ background:var(--accent-soft); }
+  .btn-row{ display:flex; flex-wrap:wrap; gap:10px; margin-top:6px; }
+
+  #loginBtn{ width:100%; margin-top:4px; }
+
+  /* --- result area --- */
+  .result-box{
+    margin-top:14px; border:1px solid var(--line); background:#fbfcfc;
+    max-height:280px; overflow:auto;
+  }
+  table.result-table{ border-collapse:collapse; width:100%; font-family:var(--mono); font-size:12.5px; }
+  table.result-table td{ border:1px solid var(--line); padding:5px 8px; white-space:nowrap; }
+  table.result-table tr:nth-child(odd){ background:#f4f6f7; }
+  .result-empty{ padding:14px; color:var(--ink-soft); font-size:13px; font-family:var(--mono); }
+
+  /* --- status bar --- */
+  #status{
+    position:fixed; left:0; right:0; bottom:0;
+    padding:10px 16px; font-size:13px; text-align:center;
+    background:#dfe4e6; color:var(--ink-soft);
+    border-top:1px solid var(--line);
+    min-height:38px; display:flex; align-items:center; justify-content:center;
+  }
+  #status.ok{ background:#e2ede3; color:var(--ok); }
+  #status.err{ background:#f3e0dc; color:var(--err); }
+  #status.busy{ background:#e6e9ea; color:var(--ink-soft); }
+
+  #mainScreen{ display:none; }
+  .who{ font-size:12.5px; color:var(--ink-soft); margin-bottom:20px; }
+  .who button{ margin-left:8px; padding:4px 10px; font-size:12px; }
+</style>
+</head>
+<body>
+
+<div class="frame">
+
+  <!-- ============ 登入畫面 ============ -->
+  <div id="loginScreen">
+    <h1>試算表操作台</h1>
+    <p class="sub">輸入帳號密碼以連線至指定的 Google Sheets</p>
+    <div class="panel">
+      <div class="field">
+        <label for="loginName">帳號</label>
+        <input type="text" id="loginName" autocomplete="username">
+      </div>
+      <div class="field">
+        <label for="loginPassword">密碼</label>
+        <input type="password" id="loginPassword" autocomplete="current-password">
+      </div>
+      <button id="loginBtn">登入</button>
+    </div>
+  </div>
+
+  <!-- ============ 主畫面 ============ -->
+  <div id="mainScreen">
+    <h1>試算表操作台</h1>
+    <div class="who">
+      已登入：<span id="whoName"></span>
+      <button class="secondary" id="logoutBtn">登出</button>
+    </div>
+
+    <!-- 讀取 -->
+    <div class="panel">
+      <h2>讀取</h2>
+      <div class="row">
+        <div class="field">
+          <label for="readSheet">試算表名稱</label>
+          <input type="text" id="readSheet" placeholder="sheet1">
+        </div>
+        <div class="field">
+          <label for="readRange">儲存格範圍</label>
+          <input type="text" id="readRange" placeholder="A1:B10">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button id="readBtn">讀取</button>
+      </div>
+      <div class="result-box" id="readResult">
+        <div class="result-empty">尚無資料</div>
+      </div>
+    </div>
+
+    <!-- 寫入 -->
+    <div class="panel">
+      <h2>寫入</h2>
+      <div class="row">
+        <div class="field">
+          <label for="writeSheet">試算表名稱</label>
+          <input type="text" id="writeSheet" placeholder="sheet1">
+        </div>
+        <div class="field">
+          <label for="writeRange">儲存格範圍</label>
+          <input type="text" id="writeRange" placeholder="A1:B1 / A / 1">
+        </div>
+      </div>
+      <div class="field">
+        <label for="writeData">資料（以逗號分隔，或直接輸入 JSON 陣列）</label>
+        <textarea id="writeData" placeholder="例如：姓名,得分 或 [&quot;姓名&quot;,&quot;得分&quot;]"></textarea>
+      </div>
+      <div class="btn-row">
+        <button id="writeBtn">寫入</button>
+        <button class="secondary" id="write2EndBtn">寫在最下方</button>
+        <button class="secondary" id="write2TopBtn">從頭插入</button>
+        <button class="secondary" id="deleteBtn">清除範圍內容</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div id="status">請先登入</div>
+
+<script>
+  // ---- GAS 網址（請替換成自己的 Apps Script 部署網址）----
+  const GAS_URL = "https://script.google.com/macros/s/你的網址/exec";
+
+  let credentials = { name: "", password: "" };
+
+  const statusEl = document.getElementById("status");
+  function setStatus(text, kind){
+    statusEl.textContent = text;
+    statusEl.className = kind || "";
+  }
+
+  async function callAPI(payload){
+    const body = Object.assign({}, credentials, payload);
+    const res = await fetch(GAS_URL, {
+      method: "POST",
+      redirect: "follow",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(body)
+    });
+    const text = await res.text();
+    try{
+      return JSON.parse(text);
+    }catch(e){
+      // 後端可能直接回傳非 JSON 內容，原樣包裝回傳
+      return { raw: text };
+    }
+  }
+
+  // ---------- 登入 ----------
+  document.getElementById("loginBtn").addEventListener("click", async () => {
+    const name = document.getElementById("loginName").value.trim();
+    const password = document.getElementById("loginPassword").value;
+    if(!name || !password){
+      setStatus("請輸入帳號與密碼", "err");
+      return;
+    }
+    credentials = { name, password };
+    setStatus("登入中…", "busy");
+    try{
+      const result = await callAPI({ read: "A1", sheet: "sheet1" });
+      if(result && result.error){
+        setStatus("登入失敗：" + result.error, "err");
+        credentials = { name: "", password: "" };
+        return;
+      }
+      document.getElementById("whoName").textContent = name;
+      document.getElementById("loginScreen").style.display = "none";
+      document.getElementById("mainScreen").style.display = "block";
+      setStatus("登入成功", "ok");
+    }catch(err){
+      setStatus("連線失敗：" + err.message, "err");
+      credentials = { name: "", password: "" };
+    }
+  });
+
+  document.getElementById("logoutBtn").addEventListener("click", () => {
+    credentials = { name: "", password: "" };
+    document.getElementById("loginPassword").value = "";
+    document.getElementById("mainScreen").style.display = "none";
+    document.getElementById("loginScreen").style.display = "block";
+    setStatus("已登出");
+  });
+
+  // ---------- 讀取 ----------
+  document.getElementById("readBtn").addEventListener("click", async () => {
+    const sheet = document.getElementById("readSheet").value.trim() || undefined;
+    const range = document.getElementById("readRange").value.trim();
+    if(!range){
+      setStatus("請輸入儲存格範圍", "err");
+      return;
+    }
+    setStatus("讀取中…", "busy");
+    try{
+      const payload = { read: range };
+      if(sheet) payload.sheet = sheet;
+      const result = await callAPI(payload);
+      renderReadResult(result);
+      if(result && result.error){
+        setStatus("讀取失敗：" + result.error, "err");
+      }else{
+        setStatus("讀取完成", "ok");
+      }
+    }catch(err){
+      setStatus("讀取失敗：" + err.message, "err");
+    }
+  });
+
+  function renderReadResult(result){
+    const box = document.getElementById("readResult");
+    let data = result;
+    if(result && typeof result === "object" && !Array.isArray(result)){
+      data = result.data !== undefined ? result.data
+           : result.values !== undefined ? result.values
+           : result.raw !== undefined ? result.raw
+           : result;
+    }
+    if(Array.isArray(data)){
+      const rows = Array.isArray(data[0]) ? data : [data];
+      let html = "<table class='result-table'>";
+      rows.forEach(r => {
+        html += "<tr>" + r.map(c => `<td>${escapeHtml(c)}</td>`).join("") + "</tr>";
+      });
+      html += "</table>";
+      box.innerHTML = html;
+    }else if(data === undefined || data === null){
+      box.innerHTML = "<div class='result-empty'>（空白）</div>";
+    }else{
+      box.innerHTML = `<div class='result-empty'>${escapeHtml(String(data))}</div>`;
+    }
+  }
+
+  function escapeHtml(v){
+    return String(v).replace(/[&<>"']/g, c => ({
+      "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+    }[c]));
+  }
+
+  // ---------- 寫入資料解析 ----------
+  // 回傳 { flat, oneRow } — flat: 一維陣列；oneRow: 包成單列的二維陣列
+  function parseInputData(raw){
+    raw = raw.trim();
+    if(raw === "") return { flat: [], oneRow: [[]] };
+    try{
+      const parsed = JSON.parse(raw);
+      if(Array.isArray(parsed)){
+        const flat = parsed;
+        const oneRow = Array.isArray(parsed[0]) ? parsed : [parsed];
+        return { flat, oneRow };
+      }
+      return { flat: [parsed], oneRow: [[parsed]] };
+    }catch(e){
+      const flat = raw.split(",").map(s => s.trim());
+      return { flat, oneRow: [flat] };
+    }
+  }
+
+  function getWriteFields(){
+    const sheet = document.getElementById("writeSheet").value.trim() || undefined;
+    const range = document.getElementById("writeRange").value.trim();
+    const rawData = document.getElementById("writeData").value;
+    return { sheet, range, rawData };
+  }
+
+  // ---------- 寫入（覆蓋指定範圍） ----------
+  document.getElementById("writeBtn").addEventListener("click", async () => {
+    const { sheet, range, rawData } = getWriteFields();
+    if(!range){ setStatus("請輸入儲存格範圍", "err"); return; }
+    const { oneRow } = parseInputData(rawData);
+    setStatus("寫入中…", "busy");
+    try{
+      const payload = { write: range, data: oneRow };
+      if(sheet) payload.sheet = sheet;
+      const result = await callAPI(payload);
+      handleWriteResult(result, "寫入完成");
+    }catch(err){
+      setStatus("寫入失敗：" + err.message, "err");
+    }
+  });
+
+  // ---------- 寫在最下方 (write2End) ----------
+  document.getElementById("write2EndBtn").addEventListener("click", async () => {
+    const { sheet, range, rawData } = getWriteFields();
+    if(!range){ setStatus("請輸入儲存格範圍（欄位字母或列號）", "err"); return; }
+    const { flat } = parseInputData(rawData);
+    setStatus("寫入中…", "busy");
+    try{
+      const payload = { write2End: range, data: flat };
+      if(sheet) payload.sheet = sheet;
+      const result = await callAPI(payload);
+      handleWriteResult(result, "已寫在最下方");
+    }catch(err){
+      setStatus("寫入失敗：" + err.message, "err");
+    }
+  });
+
+  // ---------- 從頭插入 (write2Top) ----------
+  document.getElementById("write2TopBtn").addEventListener("click", async () => {
+    const { sheet, range, rawData } = getWriteFields();
+    if(!range){ setStatus("請輸入儲存格範圍（欄位字母或列號）", "err"); return; }
+    const { flat } = parseInputData(rawData);
+    setStatus("寫入中…", "busy");
+    try{
+      const payload = { write2Top: range, data: flat };
+      if(sheet) payload.sheet = sheet;
+      const result = await callAPI(payload);
+      handleWriteResult(result, "已從頭插入");
+    }catch(err){
+      setStatus("寫入失敗：" + err.message, "err");
+    }
+  });
+
+  // ---------- 清除範圍內容 (delete) ----------
+  document.getElementById("deleteBtn").addEventListener("click", async () => {
+    const { sheet, range } = getWriteFields();
+    if(!range){ setStatus("請輸入儲存格範圍", "err"); return; }
+    setStatus("清除中…", "busy");
+    try{
+      const payload = { delete: range };
+      if(sheet) payload.sheet = sheet;
+      const result = await callAPI(payload);
+      handleWriteResult(result, "已清除內容");
+    }catch(err){
+      setStatus("清除失敗：" + err.message, "err");
+    }
+  });
+
+  function handleWriteResult(result, successMsg){
+    if(result && result.error){
+      setStatus("操作失敗：" + result.error, "err");
+    }else{
+      setStatus(successMsg, "ok");
+    }
+  }
+</script>
+
+</body>
+</html>
