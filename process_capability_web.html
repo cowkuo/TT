@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Process Capability Analysis</title>
+<title>製程能力分析 | Process Capability Analysis</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -120,6 +120,11 @@
   #analyzeBtn:hover { background: var(--blue-deep); }
   #sampleBtn { background: var(--panel); color: var(--ink); border: 1px solid var(--line); }
   #sampleBtn:hover { background: var(--line-soft); }
+  #trimBtn { background: var(--panel); color: var(--bad); border: 1px solid #E3BDB7; }
+  #trimBtn:hover { background: #F7E7E5; }
+  #restoreBtn { background: var(--panel); color: var(--ink); border: 1px solid var(--line); }
+  #restoreBtn:hover:not(:disabled) { background: var(--line-soft); }
+  #restoreBtn:disabled { color: var(--line); cursor: not-allowed; }
 
   .hint { font-size: 0.72rem; color: var(--ink-soft); margin-top: 6px; line-height: 1.5; }
   .err { color: var(--bad); font-size: 0.78rem; margin-top: 10px; display: none; }
@@ -163,6 +168,32 @@
   .chart-box { padding: 14px; border-right: 1px solid var(--line); }
   .chart-box:last-child { border-right: none; }
   .chart-title { font-size: 0.78rem; color: var(--ink-soft); margin-bottom: 8px; }
+  .dot-readout {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--blue-deep);
+    background: #E4ECF3;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 5px 10px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .mini-btn {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 600;
+    font-size: 0.72rem;
+    border: 1px solid var(--bad);
+    color: var(--bad);
+    background: #FFFFFF;
+    border-radius: 3px;
+    padding: 3px 9px;
+    cursor: pointer;
+  }
+  .mini-btn:hover { background: #F7E7E5; }
   svg { width: 100%; height: auto; display: block; }
   .axis-label { font-size: 9px; fill: var(--ink-soft); font-family: 'IBM Plex Mono', monospace; }
   .grid-line { stroke: var(--line-soft); stroke-width: 1; }
@@ -211,6 +242,11 @@
           <button id="analyzeBtn">分析 Analyze</button>
           <button id="sampleBtn">範例資料</button>
         </div>
+        <div class="btnrow">
+          <button id="trimBtn">刪除最接近規格5筆</button>
+          <button id="restoreBtn" disabled>回復 Undo</button>
+        </div>
+        <div class="hint" id="trimStatus"></div>
         <div class="err" id="errBox"></div>
       </div>
     </div>
@@ -246,7 +282,11 @@
 
         <div class="charts">
           <div class="chart-box">
-            <div class="chart-title">分布直方圖 Histogram + Normal Fit</div>
+            <div class="chart-title">分布圖（逐筆資料點） Dot Plot + Normal Fit</div>
+            <div class="dot-readout" id="histReadout">
+              <span id="histValueLabel">點擊圖上任一點，查看該筆數值</span>
+              <button id="deletePointBtn" class="mini-btn" style="display:none;">刪除此點</button>
+            </div>
             <div id="histChart"></div>
           </div>
           <div class="chart-box">
@@ -345,41 +385,50 @@ function buildHistogram(data, usl, lsl, target, mCenter, sOverall){
   const plotW = W - M.l - M.r, plotH = H - M.t - M.b;
 
   const n = data.length;
-  const binCount = Math.max(6, Math.min(20, Math.round(Math.sqrt(n))));
+  // fine-resolution columns so each data point keeps its own dot, stacked within its column
+  const binCount = Math.max(10, Math.min(40, Math.round(Math.sqrt(n)*2)));
   const dataMin = Math.min(...data, lsl ?? Infinity);
   const dataMax = Math.max(...data, usl ?? -Infinity);
   const pad = (dataMax-dataMin)*0.05 || 1;
   const xMin = dataMin - pad, xMax = dataMax + pad;
   const binWidth = (xMax-xMin)/binCount;
-  const bins = new Array(binCount).fill(0);
-  data.forEach(v=>{
+  const bins = Array.from({length: binCount}, () => []);
+  data.forEach((v, origIdx)=>{
     let idx = Math.floor((v-xMin)/binWidth);
     if (idx>=binCount) idx = binCount-1;
     if (idx<0) idx = 0;
-    bins[idx]++;
+    bins[idx].push({v, origIdx});
   });
-  const density = bins.map(c => c/(n*binWidth));
-  const maxDensity = Math.max(...density, normalPDF(mCenter, mCenter, sOverall));
+  const maxStack = Math.max(...bins.map(b=>b.length), 1);
+  // expected count curve (normal pdf scaled to counts) on the same count axis as the stacked dots
+  const peakExpected = n*binWidth*normalPDF(mCenter, mCenter, sOverall);
+  const maxCount = Math.max(maxStack, peakExpected) * 1.1;
 
   const xScale = x => M.l + ((x-xMin)/(xMax-xMin))*plotW;
-  const yScale = y => M.t + plotH - (y/maxDensity)*plotH;
+  const yScaleCount = c => M.t + plotH - (c/maxCount)*plotH;
+  const baseline = yScaleCount(0);
 
-  let bars = '';
-  bins.forEach((c,i)=>{
-    const x0 = xMin + i*binWidth, x1 = x0+binWidth;
-    const y = density[i];
-    bars += `<rect x="${xScale(x0).toFixed(1)}" y="${yScale(y).toFixed(1)}" width="${(xScale(x1)-xScale(x0)).toFixed(1)}" height="${(yScale(0)-yScale(y)).toFixed(1)}" fill="#2A5D8C" fill-opacity="0.55" stroke="#FFFFFF" stroke-width="1"/>`;
+  const colPx = xScale(xMin+binWidth) - xScale(xMin);
+  const radius = Math.max(1.6, Math.min(colPx/2*0.82, (plotH/maxCount)/2*0.88, 6.5));
+
+  let dots = '';
+  bins.forEach((pts,i)=>{
+    const cx = xScale(xMin + (i+0.5)*binWidth);
+    pts.forEach((pt,k)=>{
+      const cy = baseline - radius - k*(radius*2+1);
+      dots += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${radius.toFixed(1)}" data-value="${pt.v}" data-index="${pt.origIdx}" data-r="${radius.toFixed(2)}" fill="#2A5D8C" fill-opacity="0.75" stroke="#FFFFFF" stroke-width="0.6" style="cursor:pointer" onclick="selectDotValue(this)"/>`;
+    });
   });
 
   let curve = '';
   const steps = 80;
-  let pts = [];
+  let pts2 = [];
   for (let i=0;i<=steps;i++){
     const x = xMin + (i/steps)*(xMax-xMin);
-    const y = normalPDF(x, mCenter, sOverall);
-    pts.push(`${xScale(x).toFixed(1)},${yScale(y).toFixed(1)}`);
+    const c = n*binWidth*normalPDF(x, mCenter, sOverall);
+    pts2.push(`${xScale(x).toFixed(1)},${yScaleCount(c).toFixed(1)}`);
   }
-  curve = `<polyline points="${pts.join(' ')}" fill="none" stroke="#B23A2F" stroke-width="2"/>`;
+  curve = `<polyline points="${pts2.join(' ')}" fill="none" stroke="#B23A2F" stroke-width="2"/>`;
 
   let specLines = '';
   if (usl != null) specLines += `<line x1="${xScale(usl).toFixed(1)}" y1="${M.t}" x2="${xScale(usl).toFixed(1)}" y2="${M.t+plotH}" stroke="#B23A2F" stroke-width="1.5" stroke-dasharray="5,3"/><text x="${xScale(usl).toFixed(1)}" y="${M.t-3}" class="axis-label" text-anchor="middle">USL</text>`;
@@ -398,8 +447,8 @@ function buildHistogram(data, usl, lsl, target, mCenter, sOverall){
   return `<svg viewBox="0 0 ${W} ${H}">
     ${xTicks}
     <line x1="${M.l}" y1="${M.t+plotH}" x2="${M.l+plotW}" y2="${M.t+plotH}" stroke="#1B2430" stroke-width="1"/>
-    ${bars}
     ${curve}
+    ${dots}
     ${specLines}
   </svg>`;
 }
@@ -538,6 +587,7 @@ function analyze(){
   ];
   document.getElementById('basicTable').innerHTML = basicRows.map(([k,v])=>`<tr><td class="k">${k}</td><td class="v">${v}</td></tr>`).join('');
 
+  clearDotSelection();
   document.getElementById('histChart').innerHTML = buildHistogram(data, usl, lsl, target, m, sOverall);
   document.getElementById('qqChart').innerHTML = buildQQ(data, m, sOverall);
 }
@@ -556,10 +606,125 @@ function loadSample(){
   document.getElementById('lslInput').value = 9.5;
   document.getElementById('targetInput').value = 10.0;
   document.getElementById('subgroupInput').value = 1;
+
+  trimHistory = [];
+  document.getElementById('restoreBtn').disabled = true;
+  document.getElementById('trimStatus').textContent = '';
+  clearDotSelection();
+}
+
+let selectedPointIndex = null;
+
+function selectDotValue(el){
+  const chart = document.getElementById('histChart');
+  chart.querySelectorAll('circle').forEach(c=>{
+    c.setAttribute('stroke', '#FFFFFF');
+    c.setAttribute('stroke-width', '0.6');
+    c.setAttribute('r', c.getAttribute('data-r'));
+  });
+  const r = parseFloat(el.getAttribute('data-r'));
+  el.setAttribute('stroke', '#1B2430');
+  el.setAttribute('stroke-width', '1.6');
+  el.setAttribute('r', (r*1.25).toFixed(2));
+  const v = parseFloat(el.getAttribute('data-value'));
+  selectedPointIndex = parseInt(el.getAttribute('data-index'));
+  document.getElementById('histValueLabel').textContent = `已選取數值: ${v.toFixed(4)}`;
+  document.getElementById('deletePointBtn').style.display = 'inline-block';
+}
+
+function clearDotSelection(){
+  selectedPointIndex = null;
+  document.getElementById('histValueLabel').textContent = '點擊圖上任一點，查看該筆數值';
+  document.getElementById('deletePointBtn').style.display = 'none';
+}
+
+function deleteSelectedPoint(){
+  if (selectedPointIndex === null) return;
+  const data = parseData(document.getElementById('dataInput').value);
+  if (selectedPointIndex >= data.length) { clearDotSelection(); return; }
+
+  const removedValue = data[selectedPointIndex];
+  trimHistory.push(document.getElementById('dataInput').value);
+  document.getElementById('restoreBtn').disabled = false;
+
+  data.splice(selectedPointIndex, 1);
+  document.getElementById('dataInput').value = data.join('\n');
+  document.getElementById('trimStatus').textContent = `已刪除 1 筆資料: ${removedValue.toFixed(4)}（可按「回復 Undo」還原）`;
+
+  clearDotSelection();
+  if (document.getElementById('resultsContent').style.display !== 'none') {
+    analyze();
+  }
+}
+
+let trimHistory = [];
+
+function trimNearestToLimits(){
+  const trimStatus = document.getElementById('trimStatus');
+  const errBox = document.getElementById('errBox');
+  errBox.style.display = 'none';
+
+  const data = parseData(document.getElementById('dataInput').value);
+  const uslRaw = document.getElementById('uslInput').value;
+  const lslRaw = document.getElementById('lslInput').value;
+  const usl = uslRaw === '' ? null : parseFloat(uslRaw);
+  const lsl = lslRaw === '' ? null : parseFloat(lslRaw);
+
+  if (usl === null && lsl === null) {
+    errBox.textContent = '請先至少填寫 USL 或 LSL，才能判斷「最接近規格」的點。';
+    errBox.style.display = 'block';
+    return;
+  }
+  if (data.length === 0) {
+    errBox.textContent = '目前沒有可供刪除的數據。';
+    errBox.style.display = 'block';
+    return;
+  }
+
+  const distToLimit = v => {
+    let d = Infinity;
+    if (usl !== null) d = Math.min(d, Math.abs(v - usl));
+    if (lsl !== null) d = Math.min(d, Math.abs(v - lsl));
+    return d;
+  };
+
+  const indexed = data.map((v,i) => ({v, i, d: distToLimit(v)}));
+  indexed.sort((a,b) => a.d - b.d);
+  const removeCount = Math.min(5, indexed.length);
+  const toRemove = new Set(indexed.slice(0, removeCount).map(o => o.i));
+  const removedValues = indexed.slice(0, removeCount).map(o => o.v);
+  const remaining = data.filter((_, i) => !toRemove.has(i));
+
+  // save current textarea content so it can be restored
+  trimHistory.push(document.getElementById('dataInput').value);
+  document.getElementById('restoreBtn').disabled = false;
+
+  document.getElementById('dataInput').value = remaining.join('\n');
+  trimStatus.textContent = `已移除 ${removeCount} 筆最接近規格的數據: ${removedValues.map(v=>v.toFixed(4)).join(', ')}`;
+
+  if (document.getElementById('resultsContent').style.display !== 'none') {
+    analyze();
+  }
+}
+
+function restoreTrimmed(){
+  if (trimHistory.length === 0) return;
+  const prev = trimHistory.pop();
+  document.getElementById('dataInput').value = prev;
+  document.getElementById('trimStatus').textContent = '已回復上一次刪除的數據。';
+  if (trimHistory.length === 0) document.getElementById('restoreBtn').disabled = true;
+  clearDotSelection();
+
+  if (document.getElementById('resultsContent').style.display !== 'none') {
+    analyze();
+  }
 }
 
 document.getElementById('analyzeBtn').addEventListener('click', analyze);
 document.getElementById('sampleBtn').addEventListener('click', loadSample);
+document.getElementById('trimBtn').addEventListener('click', trimNearestToLimits);
+document.getElementById('restoreBtn').addEventListener('click', restoreTrimmed);
+document.getElementById('deletePointBtn').addEventListener('click', deleteSelectedPoint);
 </script>
 </body>
 </html>
